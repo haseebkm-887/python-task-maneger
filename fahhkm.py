@@ -6,8 +6,6 @@ import io
 import re
 import datetime
 import pandas as pd
-
-import plotly.graph_objects as go
 import bcrypt
 import streamlit as st
 from sqlalchemy import (

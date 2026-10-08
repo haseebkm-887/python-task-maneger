@@ -21,19 +21,27 @@ except ImportError:
 
 import streamlit as st
 
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    Text,
-    DateTime,
-    ForeignKey,
-    Boolean,
-    extract,
-    func
-)
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
+try:
+    from sqlalchemy import (
+        create_engine,
+        Column,
+        Integer,
+        String,
+        Text,
+        DateTime,
+        ForeignKey,
+        Boolean,
+        extract,
+        func
+    )
+    from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
+except ImportError as exc:
+    st.error(
+        "SQLAlchemy is required to use this task manager, but it isn't available "
+        "in the current Python environment. Details: {}".format(exc)
+    )
+    st.stop()
+
 
 # ==========================================
 # 1. CONFIGURATION & PAGE SETUP

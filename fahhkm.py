@@ -1,8 +1,9 @@
-# =========================
-# IMPORTS
-# =========================
+# ==========================================
+# 🚀 ALPHA TASKFLOW - PREMIUM TASK MANAGER
+# Single-File Streamlit Application (app.py)
+# ==========================================
+
 import os
-import io
 import re
 import datetime
 import pandas as pd
@@ -10,1335 +11,1082 @@ import plotly.express as px
 import plotly.graph_objects as go
 import bcrypt
 import streamlit as st
+
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Text, Date, DateTime, Time,
-    ForeignKey, Boolean, Table
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Text,
+    DateTime,
+    ForeignKey,
+    Boolean,
+    extract,
+    func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
 
-# =========================
-# CONFIGURATION
-# =========================
+# ==========================================
+# 1. CONFIGURATION & PAGE SETUP
+# ==========================================
+
 st.set_page_config(
-    page_title="ALPHA CAMPUS PORTAL",
-    page_icon="🎓",
+    page_title="ALPHA TASKFLOW — Premium Task Manager",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-DB_FILE = "alpha_campus.db"
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+DB_FILE = "alpha_taskflow.db"
+DATABASE_URL = f"sqlite:///{DB_FILE}"
 
-# Allowed upload extensions
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'ppt', 'pptx', 'png', 'jpg', 'jpeg', 'mp4', 'txt', 'zip'}
-MAX_FILE_SIZE_MB = 10
+# ==========================================
+# 2. DATABASE MODELS & INITIALIZATION
+# ==========================================
 
-# =========================
-# DATABASE & MODELS
-# =========================
+Engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=Engine))
 Base = declarative_base()
 
-class DBUser(Base):
+class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    username = Column(String(50), unique=True, nullable=False)
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(100), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    role = Column(String(20), nullable=False) # 'admin', 'teacher', 'student'
-    full_name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    student_profile = relationship("DBStudent", uselist=False, back_populates="user", cascade="all, delete-orphan")
-    teacher_profile = relationship("DBTeacher", uselist=False, back_populates="user", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="owner", cascade="all, delete-orphan")
+    projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
 
-class DBClass(Base):
-    __tablename__ = "classes"
-    id = Column(Integer, primary_key=True)
-    name = Column(String(50), unique=True, nullable=False) # e.g. "CS-101", "Semester 3"
-    code = Column(String(20), unique=True, nullable=False)
-
-    students = relationship("DBStudent", back_populates="class_rel")
-    subjects = relationship("DBSubject", back_populates="class_rel")
-    timetables = relationship("DBTimetable", back_populates="class_rel")
-
-class DBTeacher(Base):
-    __tablename__ = "teachers"
-    id = Column(Integer, primary_key=True)
+class Project(Base):
+    __tablename__ = "projects"
+    id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    employee_id = Column(String(50), unique=True, nullable=False)
-    department = Column(String(100), nullable=False)
-
-    user = relationship("DBUser", back_populates="teacher_profile")
-    subjects = relationship("DBSubject", back_populates="teacher")
-
-class DBStudent(Base):
-    __tablename__ = "students"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    student_id = Column(String(50), unique=True, nullable=False)
-    class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
-
-    user = relationship("DBUser", back_populates="student_profile")
-    class_rel = relationship("DBClass", back_populates="students")
-    attendances = relationship("DBAttendance", back_populates="student")
-    results = relationship("DBResult", back_populates="student")
-    submissions = relationship("DBSubmission", back_populates="student")
-
-class DBSubject(Base):
-    __tablename__ = "subjects"
-    id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
-    code = Column(String(20), unique=True, nullable=False)
-    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False)
-    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
-
-    class_rel = relationship("DBClass", back_populates="subjects")
-    teacher = relationship("DBTeacher", back_populates="subjects")
-    attendances = relationship("DBAttendance", back_populates="subject")
-    results = relationship("DBResult", back_populates="subject")
-    assignments = relationship("DBAssignment", back_populates="subject")
-    materials = relationship("DBMaterial", back_populates="subject")
-
-class DBAttendance(Base):
-    __tablename__ = "attendance"
-    id = Column(Integer, primary_key=True)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
-    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
-    date = Column(Date, nullable=False)
-    is_present = Column(Boolean, default=True, nullable=False)
-
-    student = relationship("DBStudent", back_populates="attendances")
-    subject = relationship("DBSubject", back_populates="attendances")
-
-class DBResult(Base):
-    __tablename__ = "results"
-    id = Column(Integer, primary_key=True)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
-    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
-    exam_name = Column(String(100), nullable=False)
-    max_marks = Column(Float, nullable=False)
-    obtained_marks = Column(Float, nullable=False)
-
-    student = relationship("DBStudent", back_populates="results")
-    subject = relationship("DBSubject", back_populates="results")
-
-class DBAssignment(Base):
-    __tablename__ = "assignments"
-    id = Column(Integer, primary_key=True)
-    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
-    title = Column(String(150), nullable=False)
     description = Column(Text, nullable=True)
-    deadline = Column(DateTime, nullable=False)
-    file_path = Column(String(255), nullable=True)
+    color = Column(String(20), default="#3B82F6")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    subject = relationship("DBSubject", back_populates="assignments")
-    submissions = relationship("DBSubmission", back_populates="assignment")
+    owner = relationship("User", back_populates="projects")
+    tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
 
-class DBSubmission(Base):
-    __tablename__ = "submissions"
-    id = Column(Integer, primary_key=True)
-    assignment_id = Column(Integer, ForeignKey("assignments.id"), nullable=False)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
-    file_path = Column(String(255), nullable=False)
-    submitted_at = Column(DateTime, default=datetime.datetime.utcnow)
-    remarks = Column(Text, nullable=True)
-
-    assignment = relationship("DBAssignment", back_populates="submissions")
-    student = relationship("DBStudent", back_populates="submissions")
-
-class DBMaterial(Base):
-    __tablename__ = "materials"
-    id = Column(Integer, primary_key=True)
-    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
-    title = Column(String(150), nullable=False)
-    file_path = Column(String(255), nullable=False)
-    uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-    subject = relationship("DBSubject", back_populates="materials")
-
-class DBAnnouncement(Base):
-    __tablename__ = "announcements"
-    id = Column(Integer, primary_key=True)
-    title = Column(String(150), nullable=False)
-    content = Column(Text, nullable=False)
-    priority = Column(String(20), default="NORMAL") # URGENT, IMPORTANT, NORMAL
-    author_name = Column(String(100), nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-class DBNotification(Base):
-    __tablename__ = "notifications"
-    id = Column(Integer, primary_key=True)
+class Task(Base):
+    __tablename__ = "tasks"
+    id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(String(50), default="General")
+    priority = Column(String(20), default="MEDIUM")  # LOW, MEDIUM, HIGH, URGENT
+    status = Column(String(20), default="TODO")      # TODO, IN PROGRESS, COMPLETED
+    due_date = Column(DateTime, nullable=True)
+    tags = Column(String(250), nullable=True)        # Comma-separated: #python,#work
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    owner = relationship("User", back_populates="tasks")
+    project = relationship("Project", back_populates="tasks")
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(100), nullable=False)
     message = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-class DBEvent(Base):
-    __tablename__ = "events"
-    id = Column(Integer, primary_key=True)
-    title = Column(String(150), nullable=False)
-    description = Column(Text, nullable=True)
-    event_date = Column(Date, nullable=False)
-    event_time = Column(String(50), nullable=True)
-    location = Column(String(100), nullable=True)
-    organizer = Column(String(100), nullable=True)
+    user = relationship("User", back_populates="notifications")
 
-class DBTimetable(Base):
-    __tablename__ = "timetable"
-    id = Column(Integer, primary_key=True)
-    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False)
-    day = Column(String(20), nullable=False) # Monday - Saturday
-    period = Column(String(50), nullable=False) # e.g. "09:00 AM - 10:00 AM"
-    subject_name = Column(String(100), nullable=False)
-    teacher_name = Column(String(100), nullable=False)
-    room = Column(String(50), nullable=False)
+Base.metadata.create_all(bind=Engine)
 
-    class_rel = relationship("DBClass", back_populates="timetables")
-
-# Setup Database Connection
-@st.cache_resource
-def get_db_engine():
-    engine = create_engine(f"sqlite:///{DB_FILE}", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine)
-    return engine
-
-engine = get_db_engine()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# ==========================================
+# 3. AUTHENTICATION & DATABASE HELPERS
+# ==========================================
 
 def get_db():
     return SessionLocal()
 
-# =========================
-# AUTHENTICATION HELPERS
-# =========================
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-def verify_password(password: str, hashed: str) -> bool:
+def check_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
-def seed_demo_data():
+def register_user(username, email, password):
     db = get_db()
     try:
-        if db.query(DBUser).count() == 0:
-            # Seed Admin
-            admin_user = DBUser(
-                username="admin",
-                email="admin@alpha.edu",
-                password_hash=hash_password("admin123"),
-                role="admin",
-                full_name="System Administrator",
-                phone="+1-800-ALPHA"
-            )
-            db.add(admin_user)
-
-            # Seed Class
-            cs_class = DBClass(name="Computer Science - Year 1", code="CS-Y1")
-            db.add(cs_class)
-            db.commit()
-
-            # Seed Teacher User
-            teacher_user = DBUser(
-                username="teacher",
-                email="teacher@alpha.edu",
-                password_hash=hash_password("teacher123"),
-                role="teacher",
-                full_name="Dr. Alan Turing",
-                phone="+1-555-0101"
-            )
-            db.add(teacher_user)
-            db.commit()
-
-            teacher_profile = DBTeacher(
-                user_id=teacher_user.id,
-                employee_id="EMP-1001",
-                department="Computer Science"
-            )
-            db.add(teacher_profile)
-            db.commit()
-
-            # Seed Student User
-            student_user = DBUser(
-                username="student",
-                email="student@alpha.edu",
-                password_hash=hash_password("student123"),
-                role="student",
-                full_name="Ada Lovelace",
-                phone="+1-555-0102"
-            )
-            db.add(student_user)
-            db.commit()
-
-            student_profile = DBStudent(
-                user_id=student_user.id,
-                student_id="STU-2024-01",
-                class_id=cs_class.id
-            )
-            db.add(student_profile)
-            db.commit()
-
-            # Seed Subject
-            subject = DBSubject(
-                name="Data Structures & Algorithms",
-                code="CS101",
-                class_id=cs_class.id,
-                teacher_id=teacher_profile.id
-            )
-            db.add(subject)
-            db.commit()
-
-            # Seed Sample Announcement
-            ann = DBAnnouncement(
-                title="Welcome to Alpha Campus Portal",
-                content="Explore your dashboard, check schedules, submission timelines, and study materials.",
-                priority="IMPORTANT",
-                author_name="Administrator"
-            )
-            db.add(ann)
-
-            # Seed Sample Event
-            evt = DBEvent(
-                title="Annual Tech Symposium 2026",
-                description="Join top industry experts for a 2-day conference on AI & Computing.",
-                event_date=datetime.date.today() + datetime.timedelta(days=15),
-                event_time="10:00 AM EST",
-                location="Main Auditorium",
-                organizer="Alpha Tech Club"
-            )
-            db.add(evt)
-
-            # Seed Timetable
-            tt = DBTimetable(
-                class_id=cs_class.id,
-                day="Monday",
-                period="09:00 AM - 10:30 AM",
-                subject_name="Data Structures & Algorithms",
-                teacher_name="Dr. Alan Turing",
-                room="Hall A"
-            )
-            db.add(tt)
-
-            # Seed Sample Notification
-            notif = DBNotification(
-                user_id=student_user.id,
-                message="Welcome to Alpha Campus! Check your timetable and upcoming assignments."
-            )
-            db.add(notif)
-
-            db.commit()
+        if db.query(User).filter((User.username == username) | (User.email == email)).first():
+            return False, "Username or Email already exists."
+        hashed = hash_password(password)
+        new_user = User(username=username, email=email, password_hash=hashed)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        # Create Default Project
+        default_proj = Project(user_id=new_user.id, name="General Workspace", description="Default inbox for personal tasks", color="#6366F1")
+        db.add(default_proj)
+        db.commit()
+        return True, "Registration successful! Please login."
+    except Exception as e:
+        db.rollback()
+        return False, f"Error creating account: {str(e)}"
     finally:
         db.close()
 
-seed_demo_data()
-
-# Session State Initialization
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "role" not in st.session_state:
-    st.session_state.role = None
-if "username" not in st.session_state:
-    st.session_state.username = None
-if "full_name" not in st.session_state:
-    st.session_state.full_name = None
-
-# =========================
-# CUSTOM CSS (FUTURISTIC NEON/NAVY SAAS)
-# =========================
-def inject_custom_css():
-    st.markdown("""
-    <style>
-    /* Main Background & Fonts */
-    .stApp {
-        background: linear-gradient(135deg, #0b0f19 0%, #111827 50%, #0d1322 100%);
-        color: #f3f4f6;
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    }
-    
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] {
-        background-color: #0d121f !important;
-        border-right: 1px solid #1f293d;
-    }
-    
-    /* Glassmorphism Cards */
-    .glass-card {
-        background: rgba(17, 24, 39, 0.7);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 16px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        transition: transform 0.2s ease, border-color 0.2s ease;
-    }
-    .glass-card:hover {
-        transform: translateY(-2px);
-        border-color: rgba(99, 102, 241, 0.4);
-    }
-
-    /* Metric Cards */
-    .metric-card {
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
-        border: 1px solid #334155;
-        border-radius: 14px;
-        padding: 18px;
-        text-align: left;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-    }
-    .metric-value {
-        font-size: 2.2rem;
-        font-weight: 700;
-        background: linear-gradient(90deg, #60a5fa, #a78bfa);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 5px 0;
-    }
-    .metric-title {
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #94a3b8;
-        font-weight: 600;
-    }
-    .metric-sub {
-        font-size: 0.8rem;
-        color: #64748b;
-    }
-
-    /* Badges */
-    .badge {
-        padding: 4px 10px;
-        border-radius: 9999px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        display: inline-block;
-    }
-    .badge-urgent { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid #ef4444; }
-    .badge-important { background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid #f59e0b; }
-    .badge-normal { background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6; }
-
-    /* Custom Buttons */
-    .stButton>button {
-        background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: 600;
-        padding: 0.5rem 1rem;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(90deg, #4338ca 0%, #6d28d9 100%);
-        box-shadow: 0 0 15px rgba(124, 58, 237, 0.5);
-    }
-
-    /* Input Field Customization */
-    input, select, textarea {
-        background-color: #1e293b !important;
-        color: #f8fafc !important;
-        border-radius: 8px !important;
-        border: 1px solid #334155 !important;
-    }
-    
-    /* Headers & Dividers */
-    h1, h2, h3, h4 {
-        color: #f8fafc;
-        font-weight: 700;
-    }
-    hr {
-        border-color: #1e293b;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-inject_custom_css()
-
-# =========================
-# HELPER UI COMPONENTS
-# =========================
-def render_metric_card(title, value, subtitle="", icon="📊"):
-    st.markdown(f"""
-    <div class="metric-card">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="metric-title">{title}</span>
-            <span style="font-size: 1.5rem;">{icon}</span>
-        </div>
-        <div class="metric-value">{value}</div>
-        <div class="metric-sub">{subtitle}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_announcement_card(ann):
-    badge_class = "badge-normal"
-    if ann.priority == "URGENT":
-        badge_class = "badge-urgent"
-    elif ann.priority == "IMPORTANT":
-        badge_class = "badge-important"
-
-    st.markdown(f"""
-    <div class="glass-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-            <h4 style="margin:0; color:#f3f4f6;">{ann.title}</h4>
-            <span class="badge {badge_class}">{ann.priority}</span>
-        </div>
-        <p style="color:#cbd5e1; font-size:0.95rem; margin-bottom: 12px;">{ann.content}</p>
-        <div style="font-size:0.8rem; color:#64748b; display:flex; justify-content:space-between;">
-            <span>✍️ {ann.author_name}</span>
-            <span>📅 {ann.created_at.strftime('%Y-%m-%d %H:%M')}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# Helper function for safe file saving
-def save_uploaded_file(uploaded_file):
-    if uploaded_file is None:
-        return None
-    ext = uploaded_file.name.split('.')[-1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        st.error(f"Invalid file format. Allowed formats: {', '.join(ALLOWED_EXTENSIONS)}")
-        return None
-    
-    file_path = os.path.join(UPLOAD_DIR, f"{int(datetime.datetime.now().timestamp())}_{uploaded_file.name}")
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return file_path
-
-# =========================
-# AUTHENTICATION SCREEN
-# =========================
-def show_login_page():
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("""
-        <div style="text-align: center; margin-bottom: 20px;">
-            <h1 style="font-size: 3rem; background: linear-gradient(90deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">🚀 ALPHA CAMPUS</h1>
-            <p style="color: #94a3b8;">Next-Generation Academic Management Portal</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        with st.form("login_form"):
-            st.subheader("Sign In")
-            username_input = st.text_input("Username or Email")
-            password_input = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Login to Campus", use_container_width=True)
-
-            if submit:
-                if not username_input or not password_input:
-                    st.error("Please enter both username and password.")
-                else:
-                    db = get_db()
-                    try:
-                        user = db.query(DBUser).filter(
-                            (DBUser.username == username_input) | (DBUser.email == username_input)
-                        ).first()
-
-                        if user and verify_password(password_input, user.password_hash):
-                            st.session_state.authenticated = True
-                            st.session_state.user_id = user.id
-                            st.session_state.role = user.role
-                            st.session_state.username = user.username
-                            st.session_state.full_name = user.full_name
-                            st.toast(f"Welcome back, {user.full_name}!", icon="👋")
-                            st.rerun()
-                        else:
-                            st.error("Invalid credentials. Please try again.")
-                    finally:
-                        db.close()
-
-        # Demo Mode Info Box
-        st.markdown("""
-        <div style="margin-top:20px; background: rgba(30, 41, 59, 0.5); padding: 15px; border-radius: 10px; border: 1px solid #334155;">
-            <p style="margin:0; font-weight:600; color:#38bdf8;">🔑 Demo Credentials:</p>
-            <ul style="margin:5px 0 0 0; padding-left:20px; font-size:0.85rem; color:#94a3b8;">
-                <li><b>Admin:</b> admin / admin123</li>
-                <li><b>Teacher:</b> teacher / teacher123</li>
-                <li><b>Student:</b> student / student123</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-# =========================
-# ADMIN DASHBOARD & MODULES
-# =========================
-def show_admin_dashboard():
+def authenticate_user(username_or_email, password):
     db = get_db()
     try:
-        st.title("🛡️ Admin Portal")
+        user = db.query(User).filter(
+            (User.username == username_or_email) | (User.email == username_or_email)
+        ).first()
+        if user and check_password(password, user.password_hash):
+            return user
+        return None
+    finally:
+        db.close()
+
+def create_notification(user_id, title, message):
+    db = get_db()
+    try:
+        notif = Notification(user_id=user_id, title=title, message=message)
+        db.add(notif)
+        db.commit()
+    finally:
+        db.close()
+
+def check_and_generate_notifications(user_id):
+    """Automatically generates notifications for overdue and due today tasks."""
+    db = get_db()
+    try:
+        today = datetime.date.today()
+        tasks = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.status != "COMPLETED",
+            Task.due_date != None
+        ).all()
         
-        # Top Stats
-        s_count = db.query(DBStudent).count()
-        t_count = db.query(DBTeacher).count()
-        c_count = db.query(DBClass).count()
-        sub_count = db.query(DBSubject).count()
+        for task in tasks:
+            task_date = task.due_date.date()
+            if task_date < today:
+                # Check if notification exists
+                exists = db.query(Notification).filter(
+                    Notification.user_id == user_id,
+                    Notification.title == "Task Overdue",
+                    Notification.message.contains(f"'{task.title}'")
+                ).first()
+                if not exists:
+                    create_notification(user_id, "Task Overdue", f"Your task '{task.title}' was due on {task_date}.")
+            elif task_date == today:
+                exists = db.query(Notification).filter(
+                    Notification.user_id == user_id,
+                    Notification.title == "Task Due Today",
+                    Notification.message.contains(f"'{task.title}'")
+                ).first()
+                if not exists:
+                    create_notification(user_id, "Task Due Today", f"Your task '{task.title}' is due today!")
+    finally:
+        db.close()
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1: render_metric_card("Total Students", s_count, "Enrolled", "🎓")
-        with col2: render_metric_card("Total Teachers", t_count, "Faculty Members", "👨‍🏫")
-        with col3: render_metric_card("Active Classes", c_count, "Batches", "🏫")
-        with col4: render_metric_card("Total Subjects", sub_count, "Courses Offered", "📚")
+# ==========================================
+# 4. SESSION MANAGEMENT & THEMES
+# ==========================================
 
-        st.markdown("<hr>", unsafe_allow_html=True)
+if "user" not in st.session_state:
+    st.session_state["user"] = None
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "dark"
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = "Dashboard"
 
-        tabs = st.tabs(["📊 Analytics", "👥 Manage Users", "🏫 Classes & Subjects", "📢 Announcements", "📅 Events", "🗓️ Timetable"])
+# Check notifications on load if logged in
+if st.session_state["user"]:
+    check_and_generate_notifications(st.session_state["user"]["id"])
 
-        # Analytics Tab
-        with tabs[0]:
-            st.subheader("System Overview & Analytics")
-            c1, c2 = st.columns(2)
+# ==========================================
+# 5. DYNAMIC GLASSMORPHISM & CSS STYLING
+# ==========================================
 
-            with c1:
-                # Student Distribution per class
-                classes = db.query(DBClass).all()
-                class_data = []
-                for c in classes:
-                    cnt = db.query(DBStudent).filter(DBStudent.class_id == c.id).count()
-                    class_data.append({"Class": c.name, "Students": cnt})
-                df_class = pd.DataFrame(class_data)
-                if not df_class.empty and df_class["Students"].sum() > 0:
-                    fig = px.pie(df_class, names="Class", values="Students", title="Student Distribution by Class",
-                                 color_discrete_sequence=px.colors.sequential.Plasma)
-                    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#f3f4f6")
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No student distribution data available.")
+def inject_custom_css(theme_mode):
+    if theme_mode == "dark":
+        bg_color = "#0B0F19"
+        card_bg = "rgba(17, 24, 39, 0.75)"
+        text_color = "#F3F4F6"
+        text_muted = "#9CA3AF"
+        border_color = "rgba(255, 255, 255, 0.1)"
+        input_bg = "rgba(31, 41, 55, 0.8)"
+        glow = "rgba(99, 102, 241, 0.25)"
+    else:
+        bg_color = "#F8FAFC"
+        card_bg = "rgba(255, 255, 255, 0.85)"
+        text_color = "#0F172A"
+        text_muted = "#64748B"
+        border_color = "rgba(0, 0, 0, 0.08)"
+        input_bg = "#FFFFFF"
+        glow = "rgba(99, 102, 241, 0.15)"
 
-            with c2:
-                # Attendance Stats Overview
-                att_records = db.query(DBAttendance).all()
-                if att_records:
-                    present = sum(1 for a in att_records if a.is_present)
-                    absent = len(att_records) - present
-                    fig_att = px.bar(x=["Present", "Absent"], y=[present, absent], labels={'x':'Status', 'y':'Count'},
-                                     title="Overall Attendance Record Log", color=["Present", "Absent"],
-                                     color_discrete_map={"Present":"#10b981", "Absent":"#ef4444"})
-                    fig_att.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#f3f4f6")
-                    st.plotly_chart(fig_att, use_container_width=True)
-                else:
-                    st.info("No attendance records logged yet.")
+    css = f"""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
-        # Manage Users Tab
-        with tabs[1]:
-            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Manage Students", "Manage Teachers", "Create User"])
-            
-            with sub_tab1:
-                st.subheader("Students Directory")
-                students = db.query(DBStudent).all()
-                stu_data = []
-                for s in students:
-                    stu_data.append({
-                        "ID": s.id,
-                        "Student Code": s.student_id,
-                        "Full Name": s.user.full_name if s.user else "N/A",
-                        "Email": s.user.email if s.user else "N/A",
-                        "Class": s.class_rel.name if s.class_rel else "Unassigned"
-                    })
-                df_stu = pd.DataFrame(stu_data)
-                st.dataframe(df_stu, use_container_width=True)
+        html, body, [class*="css"] {{
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: {bg_color};
+            color: {text_color};
+        }}
 
-                st.markdown("#### Delete Student")
-                del_id = st.number_input("Enter Student ID to Delete", min_value=1, step=1, key="del_stu")
-                if st.button("Delete Student", key="btn_del_stu"):
-                    s_to_del = db.query(DBStudent).filter(DBStudent.id == del_id).first()
-                    if s_to_del:
-                        user_to_del = s_to_del.user
-                        db.delete(s_to_del)
-                        if user_to_del:
-                            db.delete(user_to_del)
-                        db.commit()
-                        st.success("Student removed successfully.")
+        .stApp {{
+            background: {bg_color};
+        }}
+
+        /* Fade/Slide animation for main view */
+        .main .block-container {{
+            animation: fadeIn 0.4s ease-in-out;
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+        }}
+
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(8px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+
+        /* Glassmorphism Dynamic Cards */
+        .glass-card {{
+            background: {card_bg};
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid {border_color};
+            border-radius: 16px;
+            padding: 18px 22px;
+            margin-bottom: 16px;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+        }}
+
+        .glass-card:hover {{
+            transform: translateY(-4px);
+            box-shadow: 0 12px 28px -4px {glow};
+            border-color: rgba(99, 102, 241, 0.4);
+        }}
+
+        /* Metric Cards */
+        .metric-card {{
+            background: {card_bg};
+            backdrop-filter: blur(12px);
+            border: 1px solid {border_color};
+            border-radius: 16px;
+            padding: 16px 20px;
+            text-align: left;
+            transition: transform 0.2s ease;
+        }}
+        .metric-card:hover {{
+            transform: translateY(-2px);
+        }}
+        .metric-title {{
+            font-size: 0.85rem;
+            color: {text_muted};
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+        .metric-value {{
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin-top: 4px;
+            color: {text_color};
+        }}
+
+        /* Task Status Badges */
+        .badge {{
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            display: inline-block;
+        }}
+        .badge-todo {{ background: rgba(59, 130, 246, 0.15); color: #60A5FA; border: 1px solid rgba(59, 130, 246, 0.3); }}
+        .badge-progress {{ background: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.3); }}
+        .badge-completed {{ background: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.3); }}
+
+        /* Priority Indicators */
+        .priority-LOW {{ color: #10B981; font-weight: 600; }}
+        .priority-MEDIUM {{ color: #F59E0B; font-weight: 600; }}
+        .priority-HIGH {{ color: #EF4444; font-weight: 700; }}
+        .priority-URGENT {{ color: #EC4899; font-weight: 800; animation: pulse 2s infinite; }}
+
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.5; }}
+        }}
+
+        /* Deadline Tags */
+        .deadline-overdue {{ color: #EF4444; font-weight: 700; }}
+        .deadline-today {{ color: #F59E0B; font-weight: 700; }}
+        .deadline-upcoming {{ color: #3B82F6; font-weight: 600; }}
+        .deadline-completed {{ color: #10B981; font-weight: 500; }}
+
+        /* Tag Badges */
+        .tag-badge {{
+            background: rgba(99, 102, 241, 0.12);
+            color: #818CF8;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            margin-right: 4px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }}
+
+        /* Buttons & Forms Styling */
+        .stButton>button {{
+            border-radius: 12px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            border: 1px solid {border_color};
+        }}
+        .stButton>button:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px {glow};
+        }}
+
+        /* Hide Streamlit Branding */
+        #MainMenu {{visibility: hidden;}}
+        footer {{visibility: hidden;}}
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
+
+inject_custom_css(st.session_state["theme"])
+
+# ==========================================
+# 6. UI COMPONENTS & HELPER RENDERERS
+# ==========================================
+
+def render_empty_state(message="You're all clear!", submessage="No tasks match your criteria. Enjoy your day or create a new task."):
+    st.markdown(f"""
+    <div class="glass-card" style="text-align: center; padding: 48px 24px;">
+        <div style="font-size: 3rem; margin-bottom: 12px;">✨</div>
+        <h3 style="margin: 0; font-weight: 700;">{message}</h3>
+        <p style="color: gray; margin-top: 8px; font-size: 0.95rem;">{submessage}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_task_card(task, projects_dict):
+    today = datetime.date.today()
+    
+    # Priority Color Styling
+    priority_class = f"priority-{task.priority}"
+    
+    # Status Badge
+    status_class = "badge-todo"
+    if task.status == "IN PROGRESS":
+        status_class = "badge-progress"
+    elif task.status == "COMPLETED":
+        status_class = "badge-completed"
+        
+    # Deadline Calculation
+    deadline_text = "No due date"
+    deadline_class = ""
+    if task.due_date:
+        due_d = task.due_date.date()
+        if task.status == "COMPLETED":
+            deadline_text = f"Done on {task.completed_at.strftime('%b %d') if task.completed_at else 'N/A'}"
+            deadline_class = "deadline-completed"
+        elif due_d < today:
+            deadline_text = f"🔴 Overdue ({due_d.strftime('%b %d')})"
+            deadline_class = "deadline-overdue"
+        elif due_d == today:
+            deadline_text = f"🟡 Due Today"
+            deadline_class = "deadline-today"
+        elif due_d == today + datetime.timedelta(days=1):
+            deadline_text = f"🔵 Tomorrow"
+            deadline_class = "deadline-upcoming"
+        else:
+            deadline_text = f"📅 {due_d.strftime('%b %d, %Y')}"
+            deadline_class = "deadline-upcoming"
+
+    # Project Name
+    project_name = projects_dict.get(task.project_id, "General")
+    
+    # Tags HTML
+    tags_html = ""
+    if task.tags:
+        for tag in task.tags.split(","):
+            tag_clean = tag.strip()
+            if tag_clean:
+                if not tag_clean.startswith("#"):
+                    tag_clean = f"#{tag_clean}"
+                tags_html += f'<span class="tag-badge">{tag_clean}</span>'
+
+    card_html = f"""
+    <div class="glass-card">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <span class="badge {status_class}">{task.status}</span>
+                <span style="font-size: 0.8rem; margin-left: 8px;" class="{priority_class}">⚡ {task.priority}</span>
+                <h4 style="margin: 8px 0 4px 0; font-weight: 700; font-size: 1.1rem;">{task.title}</h4>
+            </div>
+            <span class="{deadline_class}" style="font-size: 0.85rem;">{deadline_text}</span>
+        </div>
+        <p style="color: gray; font-size: 0.88rem; margin: 4px 0 12px 0;">{task.description if task.description else 'No description provided.'}</p>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
+            <div>{tags_html}</div>
+            <div style="color: gray; font-weight: 500;">📁 {project_name} | 🏷️ {task.category}</div>
+        </div>
+    </div>
+    """
+    st.markdown(card_html, unsafe_allow_html=True)
+
+# ==========================================
+# 7. AUTHENTICATION MODULE (LOGIN / REGISTER)
+# ==========================================
+
+def render_auth_page():
+    st.markdown("<h1 style='text-align: center; font-weight: 800; font-size: 2.8rem;'>⚡ ALPHA TASKFLOW</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray; margin-bottom: 30px;'>Next-Generation Productivity & Task Intelligence Platform</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.8, 1])
+    with col2:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        tab1, tab2 = st.tabs(["🔒 Sign In", "🚀 Create Account"])
+        
+        with tab1:
+            st.subheader("Welcome Back")
+            login_user = st.text_input("Username or Email", key="login_u")
+            login_pass = st.text_input("Password", type="password", key="login_p")
+            if st.button("Sign In", use_container_width=True, type="primary"):
+                if login_user and login_pass:
+                    user = authenticate_user(login_user, login_pass)
+                    if user:
+                        st.session_state["user"] = {
+                            "id": user.id,
+                            "username": user.username,
+                            "email": user.email
+                        }
+                        st.toast("Welcome back to Alpha Taskflow!", icon="⚡")
                         st.rerun()
                     else:
-                        st.error("Student ID not found.")
+                        st.error("Invalid username/email or password.")
+                else:
+                    st.warning("Please fill in all fields.")
 
-            with sub_tab2:
-                st.subheader("Teachers Directory")
-                teachers = db.query(DBTeacher).all()
-                teach_data = []
-                for t in teachers:
-                    teach_data.append({
-                        "ID": t.id,
-                        "Employee Code": t.employee_id,
-                        "Full Name": t.user.full_name if t.user else "N/A",
-                        "Email": t.user.email if t.user else "N/A",
-                        "Department": t.department
-                    })
-                df_teach = pd.DataFrame(teach_data)
-                st.dataframe(df_teach, use_container_width=True)
-
-            with sub_tab3:
-                st.subheader("Add New User Account")
-                with st.form("add_user_form"):
-                    u_name = st.text_input("Username")
-                    u_email = st.text_input("Email")
-                    u_pass = st.text_input("Password", type="password")
-                    u_fname = st.text_input("Full Name")
-                    u_phone = st.text_input("Phone Number")
-                    u_role = st.selectbox("Role", ["student", "teacher", "admin"])
-
-                    # Dynamic extra fields
-                    all_classes = db.query(DBClass).all()
-                    class_opts = {c.name: c.id for c in all_classes}
-                    sel_class = st.selectbox("Assign Class (If Student)", list(class_opts.keys())) if class_opts else None
-                    u_dept = st.text_input("Department (If Teacher)", value="Computer Science")
-                    
-                    submitted = st.form_submit_button("Create Account")
-                    if submitted:
-                        if not u_name or not u_email or not u_pass or not u_fname:
-                            st.error("Please fill in all mandatory fields.")
+        with tab2:
+            st.subheader("Join Alpha Taskflow")
+            reg_user = st.text_input("Username", key="reg_u")
+            reg_email = st.text_input("Email Address", key="reg_e")
+            reg_pass = st.text_input("Password", type="password", key="reg_p")
+            if st.button("Create Free Account", use_container_width=True):
+                if reg_user and reg_email and reg_pass:
+                    if len(reg_pass) < 6:
+                        st.error("Password must be at least 6 characters.")
+                    elif not re.match(r"[^@]+@[^@]+\.[^@]+", reg_email):
+                        st.error("Invalid email address format.")
+                    else:
+                        success, msg = register_user(reg_user, reg_email, reg_pass)
+                        if success:
+                            st.success(msg)
                         else:
-                            try:
-                                new_u = DBUser(
-                                    username=u_name,
-                                    email=u_email,
-                                    password_hash=hash_password(u_pass),
-                                    role=u_role,
-                                    full_name=u_fname,
-                                    phone=u_phone
-                                )
-                                db.add(new_u)
-                                db.commit()
+                            st.error(msg)
+                else:
+                    st.warning("Please fill in all fields.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-                                if u_role == "student":
-                                    c_id = class_opts.get(sel_class) if sel_class else None
-                                    new_s = DBStudent(user_id=new_u.id, student_id=f"STU-{new_u.id:04d}", class_id=c_id)
-                                    db.add(new_s)
-                                elif u_role == "teacher":
-                                    new_t = DBTeacher(user_id=new_u.id, employee_id=f"EMP-{new_u.id:04d}", department=u_dept)
-                                    db.add(new_t)
-                                
-                                db.commit()
-                                st.success(f"User '{u_name}' created successfully as {u_role}!")
-                                st.rerun()
-                            except Exception as e:
-                                db.rollback()
-                                st.error(f"Error creating user: {e}")
+# ==========================================
+# 8. MAIN DASHBOARD VIEW
+# ==========================================
 
-        # Classes & Subjects Tab
-        with tabs[2]:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("Classes Management")
-                classes = db.query(DBClass).all()
-                st.dataframe(pd.DataFrame([{"ID": c.id, "Class Name": c.name, "Code": c.code} for c in classes]), use_container_width=True)
-                
-                with st.form("add_class_form"):
-                    st.markdown("##### Create Class")
-                    c_name = st.text_input("Class Name")
-                    c_code = st.text_input("Class Code")
-                    if st.form_submit_button("Add Class"):
-                        if c_name and c_code:
-                            db.add(DBClass(name=c_name, code=c_code))
-                            db.commit()
-                            st.success("Class added!")
-                            st.rerun()
-
-            with c2:
-                st.subheader("Subjects Management")
-                subjects = db.query(DBSubject).all()
-                st.dataframe(pd.DataFrame([{
-                    "ID": s.id, "Subject": s.name, "Code": s.code,
-                    "Class": s.class_rel.name if s.class_rel else "N/A",
-                    "Teacher": s.teacher.user.full_name if s.teacher and s.teacher.user else "Unassigned"
-                } for s in subjects]), use_container_width=True)
-
-                with st.form("add_sub_form"):
-                    st.markdown("##### Create Subject")
-                    sub_name = st.text_input("Subject Name")
-                    sub_code = st.text_input("Subject Code")
-                    all_c = db.query(DBClass).all()
-                    all_t = db.query(DBTeacher).all()
-                    sel_c = st.selectbox("Class", [c.name for c in all_c]) if all_c else None
-                    sel_t = st.selectbox("Teacher", [t.user.full_name for t in all_t if t.user]) if all_t else None
-
-                    if st.form_submit_button("Add Subject"):
-                        if sub_name and sub_code and sel_c:
-                            c_obj = db.query(DBClass).filter(DBClass.name == sel_c).first()
-                            t_obj = None
-                            if sel_t:
-                                t_user = db.query(DBUser).filter(DBUser.full_name == sel_t).first()
-                                if t_user: t_obj = t_user.teacher_profile
-                            
-                            db.add(DBSubject(
-                                name=sub_name, code=sub_code,
-                                class_id=c_obj.id, teacher_id=t_obj.id if t_obj else None
-                            ))
-                            db.commit()
-                            st.success("Subject created successfully!")
-                            st.rerun()
-
-        # Announcements Tab
-        with tabs[3]:
-            st.subheader("Broadcast System Announcement")
-            with st.form("new_ann_form"):
-                a_title = st.text_input("Title")
-                a_content = st.text_area("Content")
-                a_prio = st.selectbox("Priority", ["NORMAL", "IMPORTANT", "URGENT"])
-                if st.form_submit_button("Publish Announcement"):
-                    if a_title and a_content:
-                        db.add(DBAnnouncement(
-                            title=a_title, content=a_content, priority=a_prio,
-                            author_name=st.session_state.full_name
-                        ))
-                        db.commit()
-                        st.success("Announcement broadcasted!")
-                        st.rerun()
-
-            st.markdown("#### Recent Broadcasts")
-            anns = db.query(DBAnnouncement).order_by(DBAnnouncement.created_at.desc()).all()
-            for a in anns:
-                render_announcement_card(a)
-
-        # Events Tab
-        with tabs[4]:
-            st.subheader("Create Campus Event")
-            with st.form("event_form"):
-                e_title = st.text_input("Event Title")
-                e_desc = st.text_area("Description")
-                e_date = st.date_input("Event Date", datetime.date.today())
-                e_time = st.text_input("Time (e.g. 10:00 AM)")
-                e_loc = st.text_input("Location")
-                e_org = st.text_input("Organizer")
-                if st.form_submit_button("Post Event"):
-                    if e_title:
-                        db.add(DBEvent(
-                            title=e_title, description=e_desc, event_date=e_date,
-                            event_time=e_time, location=e_loc, organizer=e_org
-                        ))
-                        db.commit()
-                        st.success("Event created!")
-                        st.rerun()
-
-        # Timetable Tab
-        with tabs[5]:
-            st.subheader("Add Timetable Entry")
-            with st.form("tt_form"):
-                all_c = db.query(DBClass).all()
-                c_opts = {c.name: c.id for c in all_c}
-                sel_c = st.selectbox("Select Class", list(c_opts.keys())) if c_opts else None
-                day = st.selectbox("Day", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"])
-                period = st.text_input("Period Slot (e.g. 09:00 AM - 10:00 AM)")
-                s_name = st.text_input("Subject Name")
-                t_name = st.text_input("Teacher Name")
-                room = st.text_input("Room No / Hall")
-                if st.form_submit_button("Save Timetable Slot"):
-                    if sel_c and period and s_name:
-                        db.add(DBTimetable(
-                            class_id=c_opts[sel_c], day=day, period=period,
-                            subject_name=s_name, teacher_name=t_name, room=room
-                        ))
-                        db.commit()
-                        st.success("Timetable slot created!")
-                        st.rerun()
-
-    finally:
-        db.close()
-
-# =========================
-# TEACHER DASHBOARD & MODULES
-# =========================
-def show_teacher_dashboard():
+def render_dashboard(user_id):
     db = get_db()
     try:
-        user_id = st.session_state.user_id
-        teacher = db.query(DBTeacher).filter(DBTeacher.user_id == user_id).first()
-
-        if not teacher:
-            st.error("Teacher profile context not found.")
-            return
-
-        st.title(f"👨‍🏫 Teacher Dashboard — Welcome, {st.session_state.full_name}")
-
-        subjects = db.query(DBSubject).filter(DBSubject.teacher_id == teacher.id).all()
-        sub_count = len(subjects)
+        user_name = st.session_state["user"]["username"].capitalize()
+        st.markdown(f"## Good day, {user_name} 👋")
+        st.markdown("<p style='color: gray;'>Let's stay focused and achieve your goals today.</p>", unsafe_allow_html=True)
         
-        col1, col2, col3 = st.columns(3)
-        with col1: render_metric_card("Assigned Subjects", sub_count, "Active Courses", "📖")
-        with col2: render_metric_card("Department", teacher.department, "Faculty", "🏢")
-        with col3: render_metric_card("Employee ID", teacher.employee_id, "Official Badge", "🆔")
+        # Query User Metrics
+        total_tasks = db.query(Task).filter(Task.user_id == user_id).count()
+        completed_tasks = db.query(Task).filter(Task.user_id == user_id, Task.status == "COMPLETED").count()
+        in_progress_tasks = db.query(Task).filter(Task.user_id == user_id, Task.status == "IN PROGRESS").count()
+        
+        today = datetime.date.today()
+        overdue_tasks = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.status != "COMPLETED",
+            Task.due_date < today
+        ).count()
 
-        st.markdown("<hr>", unsafe_allow_html=True)
+        # Render Metric Cards
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.markdown(f'<div class="metric-card"><div class="metric-title">Total Tasks</div><div class="metric-value">{total_tasks}</div></div>', unsafe_allow_html=True)
+        with m2:
+            st.markdown(f'<div class="metric-card"><div class="metric-title">Completed</div><div class="metric-value" style="color:#34D399;">{completed_tasks}</div></div>', unsafe_allow_html=True)
+        with m3:
+            st.markdown(f'<div class="metric-card"><div class="metric-title">In Progress</div><div class="metric-value" style="color:#FBBF24;">{in_progress_tasks}</div></div>', unsafe_allow_html=True)
+        with m4:
+            st.markdown(f'<div class="metric-card"><div class="metric-title">Overdue</div><div class="metric-value" style="color:#F87171;">{overdue_tasks}</div></div>', unsafe_allow_html=True)
 
-        tabs = st.tabs(["✅ Attendance Marking", "📝 Results & Grades", "📚 Assignments", "📁 Materials", "📢 Announcements"])
+        st.markdown("---")
 
-        # Attendance Marking Tab
-        with tabs[0]:
-            st.subheader("Mark Student Attendance")
-            if not subjects:
-                st.warning("You have not been assigned any subjects yet.")
+        # Productivity Overview & Charts
+        c1, c2 = st.columns([1.8, 1])
+        
+        with c1:
+            st.subheader("📈 Weekly Productivity Velocity")
+            # Generate past 7 days chart data
+            days = [today - datetime.timedelta(days=i) for i in range(6, -1, -1)]
+            day_labels = [d.strftime("%a") for d in days]
+            counts = []
+            
+            for d in days:
+                cnt = db.query(Task).filter(
+                    Task.user_id == user_id,
+                    Task.status == "COMPLETED",
+                    func.date(Task.completed_at) == d
+                ).count()
+                counts.append(cnt)
+
+            df_chart = pd.DataFrame({"Day": day_labels, "Completed Tasks": counts})
+            
+            fig = px.bar(
+                df_chart, 
+                x="Day", 
+                y="Completed Tasks", 
+                text="Completed Tasks",
+                color_discrete_sequence=["#6366F1"]
+            )
+            fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#9CA3AF"),
+                margin=dict(l=10, r=10, t=20, b=20),
+                height=260,
+                xaxis=dict(showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)")
+            )
+            fig.update_traces(marker_round_shape="round", marker_line_width=0)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with c2:
+            st.subheader("🎯 Priority Distribution")
+            p_counts = []
+            p_labels = ["LOW", "MEDIUM", "HIGH", "URGENT"]
+            for p in p_labels:
+                cnt = db.query(Task).filter(Task.user_id == user_id, Task.priority == p, Task.status != "COMPLETED").count()
+                p_counts.append(cnt)
+            
+            df_pie = pd.DataFrame({"Priority": p_labels, "Count": p_counts})
+            if sum(p_counts) > 0:
+                fig_pie = px.pie(
+                    df_pie, 
+                    values="Count", 
+                    names="Priority",
+                    color="Priority",
+                    color_discrete_map={
+                        "LOW": "#10B981",
+                        "MEDIUM": "#F59E0B",
+                        "HIGH": "#EF4444",
+                        "URGENT": "#EC4899"
+                    },
+                    hole=0.5
+                )
+                fig_pie.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#9CA3AF"),
+                    margin=dict(l=10, r=10, t=20, b=20),
+                    height=260,
+                    showlegend=True
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
             else:
-                sub_opts = {f"{s.name} ({s.class_rel.name})": s for s in subjects}
-                sel_sub_label = st.selectbox("Select Subject & Class", list(sub_opts.keys()))
-                sel_sub = sub_opts[sel_sub_label]
+                st.info("No active tasks to show priority breakdown.")
 
-                att_date = st.date_input("Attendance Date", datetime.date.today())
+        st.markdown("---")
+        st.subheader("📌 High Priority & Immediate Focus")
+        
+        # High Priority or Urgent Tasks List
+        urgent_tasks = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.status != "COMPLETED",
+            Task.priority.in_(["HIGH", "URGENT"])
+        ).order_by(Task.due_date.asc()).limit(5).all()
 
-                students = db.query(DBStudent).filter(DBStudent.class_id == sel_sub.class_id).all()
-                if not students:
-                    st.info("No students enrolled in this class.")
-                else:
-                    with st.form("attendance_form"):
-                        st.markdown(f"**Mark Attendance for {sel_sub.name} on {att_date}**")
-                        att_status = {}
-                        for stu in students:
-                            stu_name = stu.user.full_name if stu.user else stu.student_id
-                            att_status[stu.id] = st.checkbox(f"{stu_name} ({stu.student_id})", value=True)
+        projects = db.query(Project).filter(Project.user_id == user_id).all()
+        proj_dict = {p.id: p.name for p in projects}
+
+        if urgent_tasks:
+            for t in urgent_tasks:
+                render_task_card(t, proj_dict)
+        else:
+            render_empty_state("No Critical Tasks Pending", "All high-priority goals are currently up to date.")
+
+    finally:
+        db.close()
+
+# ==========================================
+# 9. TASK MANAGEMENT & VIEWS MODULE
+# ==========================================
+
+def render_task_management(user_id):
+    db = get_db()
+    try:
+        st.title("📋 Task Flow Manager")
+        
+        projects = db.query(Project).filter(Project.user_id == user_id).all()
+        proj_dict = {p.id: p.name for p in projects}
+        proj_options = {"All Projects": None}
+        for p in projects:
+            proj_options[p.name] = p.id
+
+        # Task View Switcher Tabs
+        view_tab, quick_add_tab, create_tab = st.tabs(["🔍 View Tasks", "⚡ Quick Add", "➕ Detailed Task Creation"])
+
+        # ------------------- TAB 1: VIEW TASKS -------------------
+        with view_tab:
+            # Filters & Controls
+            f_col1, f_col2, f_col3, f_col4 = st.columns([1.5, 1, 1, 1])
+            with f_col1:
+                search_query = st.text_input("🔎 Search Tasks", placeholder="Search title, tags, description...")
+            with f_col2:
+                status_filter = st.selectbox("Status", ["ALL", "TODO", "IN PROGRESS", "COMPLETED", "OVERDUE", "TODAY"])
+            with f_col3:
+                priority_filter = st.selectbox("Priority", ["ALL", "LOW", "MEDIUM", "HIGH", "URGENT"])
+            with f_col4:
+                project_filter = st.selectbox("Project", list(proj_options.keys()))
+
+            # Base Query
+            query = db.query(Task).filter(Task.user_id == user_id)
+
+            # Apply Filters
+            if search_query:
+                sq = f"%{search_query}%"
+                query = query.filter((Task.title.ilike(sq)) | (Task.description.ilike(sq)) | (Task.tags.ilike(sq)))
+            
+            today = datetime.date.today()
+            if status_filter == "OVERDUE":
+                query = query.filter(Task.status != "COMPLETED", Task.due_date < today)
+            elif status_filter == "TODAY":
+                query = query.filter(Task.due_date == today)
+            elif status_filter != "ALL":
+                query = query.filter(Task.status == status_filter)
+
+            if priority_filter != "ALL":
+                query = query.filter(Task.priority == priority_filter)
+
+            if proj_options[project_filter] is not None:
+                query = query.filter(Task.project_id == proj_options[project_filter])
+
+            tasks = query.order_by(Task.due_date.asc().nullslast(), Task.created_at.desc()).all()
+
+            st.caption(f"Showing {len(tasks)} matching task(s)")
+
+            if not tasks:
+                render_empty_state()
+            else:
+                for task in tasks:
+                    col_card, col_act = st.columns([4, 1.2])
+                    with col_card:
+                        render_task_card(task, proj_dict)
+                    with col_act:
+                        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
                         
-                        if st.form_submit_button("Save Attendance"):
-                            for stu_id, is_pres in att_status.items():
-                                # Check existing record
-                                existing = db.query(DBAttendance).filter(
-                                    DBAttendance.student_id == stu_id,
-                                    DBAttendance.subject_id == sel_sub.id,
-                                    DBAttendance.date == att_date
-                                ).first()
-                                if existing:
-                                    existing.is_present = is_pres
-                                else:
-                                    db.add(DBAttendance(
-                                        student_id=stu_id,
-                                        subject_id=sel_sub.id,
-                                        date=att_date,
-                                        is_present=is_pres
-                                    ))
-                            db.commit()
-                            st.success("Attendance saved successfully!")
+                        # Interactive Actions
+                        if task.status != "COMPLETED":
+                            if st.button("✅ Complete", key=f"comp_{task.id}", use_container_width=True):
+                                task.status = "COMPLETED"
+                                task.completed_at = datetime.datetime.utcnow()
+                                db.commit()
+                                st.toast(f"Task '{task.title}' completed!", icon="🎉")
+                                st.rerun()
+                        else:
+                            if st.button("↩️ Reopen", key=f"reopen_{task.id}", use_container_width=True):
+                                task.status = "TODO"
+                                task.completed_at = None
+                                db.commit()
+                                st.toast(f"Task '{task.title}' reopened.")
+                                st.rerun()
 
-        # Results & Grades Tab
-        with tabs[1]:
-            st.subheader("Enter Exam Results")
-            if subjects:
-                sub_opts = {f"{s.name} ({s.class_rel.name})": s for s in subjects}
-                sel_sub_label = st.selectbox("Subject Context", list(sub_opts.keys()), key="res_sub")
-                sel_sub = sub_opts[sel_sub_label]
+                        # Edit Expander / Modal
+                        with st.popover("✏️ Edit Task", use_container_width=True):
+                            st.subheader("Edit Task")
+                            new_title = st.text_input("Title", value=task.title, key=f"e_title_{task.id}")
+                            new_desc = st.text_area("Description", value=task.description or "", key=f"e_desc_{task.id}")
+                            new_status = st.selectbox("Status", ["TODO", "IN PROGRESS", "COMPLETED"], index=["TODO", "IN PROGRESS", "COMPLETED"].index(task.status), key=f"e_stat_{task.id}")
+                            new_prio = st.selectbox("Priority", ["LOW", "MEDIUM", "HIGH", "URGENT"], index=["LOW", "MEDIUM", "HIGH", "URGENT"].index(task.priority), key=f"e_prio_{task.id}")
+                            
+                            cur_date = task.due_date.date() if task.due_date else datetime.date.today()
+                            new_date = st.date_input("Due Date", value=cur_date, key=f"e_date_{task.id}")
+                            new_tags = st.text_input("Tags (comma separated)", value=task.tags or "", key=f"e_tags_{task.id}")
+                            
+                            if st.button("Save Changes", key=f"save_{task.id}", type="primary"):
+                                task.title = new_title
+                                task.description = new_desc
+                                task.status = new_status
+                                task.priority = new_prio
+                                task.due_date = datetime.datetime.combine(new_date, datetime.time.min)
+                                task.tags = new_tags
+                                task.updated_at = datetime.datetime.utcnow()
+                                if new_status == "COMPLETED" and not task.completed_at:
+                                    task.completed_at = datetime.datetime.utcnow()
+                                db.commit()
+                                st.toast("Task updated successfully!")
+                                st.rerun()
 
-                exam_name = st.text_input("Exam Name (e.g., Midterm Exam, Final Assessment)")
-                max_m = st.number_input("Maximum Marks", value=100.0)
+                        # Delete Task with Confirmation Safety
+                        with st.popover("🗑️ Delete", use_container_width=True):
+                            st.write("Are you sure? This action cannot be undone.")
+                            if st.button("Confirm Delete", key=f"del_{task.id}", type="primary"):
+                                db.delete(task)
+                                db.commit()
+                                st.toast("Task deleted.")
+                                st.rerun()
 
-                students = db.query(DBStudent).filter(DBStudent.class_id == sel_sub.class_id).all()
-                if students and exam_name:
-                    with st.form("results_form"):
-                        marks_dict = {}
-                        for stu in students:
-                            stu_name = stu.user.full_name if stu.user else stu.student_id
-                            marks_dict[stu.id] = st.number_input(f"Obtained Marks: {stu_name}", min_value=0.0, max_value=float(max_m), value=0.0)
-                        
-                        if st.form_submit_button("Record Results"):
-                            for stu_id, obt in marks_dict.items():
-                                db.add(DBResult(
-                                    student_id=stu_id,
-                                    subject_id=sel_sub.id,
-                                    exam_name=exam_name,
-                                    max_marks=max_m,
-                                    obtained_marks=obt
-                                ))
-                            db.commit()
-                            st.success("Exam results submitted successfully!")
-
-        # Assignments Tab
-        with tabs[2]:
-            st.subheader("Create New Assignment")
-            if subjects:
-                sub_opts = {s.name: s.id for s in subjects}
-                sel_s_id = st.selectbox("Subject", list(sub_opts.keys()), key="ass_sub")
-                a_title = st.text_input("Assignment Title")
-                a_desc = st.text_area("Instructions / Details")
-                a_deadline = st.date_input("Deadline", datetime.date.today() + datetime.timedelta(days=7))
-                a_file = st.file_uploader("Attach Document/Instructions (Optional)", key="ass_file")
-
-                if st.button("Publish Assignment"):
-                    if a_title:
-                        file_p = save_uploaded_file(a_file) if a_file else None
-                        db.add(DBAssignment(
-                            subject_id=sub_opts[sel_s_id],
-                            title=a_title,
-                            description=a_desc,
-                            deadline=datetime.datetime.combine(a_deadline, datetime.time(23, 59)),
-                            file_path=file_p
-                        ))
+        # ------------------- TAB 2: QUICK ADD -------------------
+        with quick_add_tab:
+            st.subheader("⚡ Fast Task Entry")
+            with st.form("quick_add_form", clear_on_submit=True):
+                q_title = st.text_input("Task Title*", placeholder="e.g., Review Q3 Financial Plan")
+                qc1, qc2 = st.columns(2)
+                with qc1:
+                    q_prio = st.selectbox("Priority", ["LOW", "MEDIUM", "HIGH", "URGENT"], index=1)
+                with qc2:
+                    q_date = st.date_input("Due Date", value=datetime.date.today())
+                
+                q_submit = st.form_submit_button("Create Task Immediately", type="primary", use_container_width=True)
+                if q_submit:
+                    if not q_title.strip():
+                        st.error("Task title cannot be empty.")
+                    else:
+                        new_t = Task(
+                            user_id=user_id,
+                            title=q_title,
+                            priority=q_prio,
+                            due_date=datetime.datetime.combine(q_date, datetime.time.min),
+                            project_id=projects[0].id if projects else None
+                        )
+                        db.add(new_t)
                         db.commit()
-                        st.success("Assignment created!")
+                        st.toast("Task created successfully!", icon="🚀")
                         st.rerun()
 
-        # Materials Tab
-        with tabs[3]:
-            st.subheader("Upload Study Material")
-            if subjects:
-                sub_opts = {s.name: s.id for s in subjects}
-                sel_s_id = st.selectbox("Subject", list(sub_opts.keys()), key="mat_sub")
-                m_title = st.text_input("Resource Title")
-                m_file = st.file_uploader("Upload File (PDF, DOCX, PPTX, etc.)", key="mat_file")
+        # ------------------- TAB 3: DETAILED CREATION -------------------
+        with create_tab:
+            st.subheader("➕ Create Detailed Task")
+            with st.form("detailed_add_form", clear_on_submit=True):
+                d_title = st.text_input("Task Title*")
+                d_desc = st.text_area("Description")
+                
+                dc1, dc2, dc3 = st.columns(3)
+                with dc1:
+                    d_project = st.selectbox("Project", list(proj_options.keys())[1:]) if len(proj_options) > 1 else None
+                with dc2:
+                    d_category = st.selectbox("Category", ["Study", "Coding", "Personal", "Work", "Design", "Fitness", "Other"])
+                with dc3:
+                    d_prio = st.selectbox("Priority", ["LOW", "MEDIUM", "HIGH", "URGENT"], index=1)
 
-                if st.button("Upload Material"):
-                    if m_title and m_file:
-                        file_p = save_uploaded_file(m_file)
-                        if file_p:
-                            db.add(DBMaterial(
-                                subject_id=sub_opts[sel_s_id],
-                                title=m_title,
-                                file_path=file_p
-                            ))
-                            db.commit()
-                            st.success("Study material uploaded!")
-                            st.rerun()
+                dc4, dc5 = st.columns(2)
+                with dc4:
+                    d_date = st.date_input("Due Date", value=datetime.date.today())
+                with dc5:
+                    d_time = st.time_input("Due Time", value=datetime.time(17, 0))
 
-        # Announcements Tab
-        with tabs[4]:
-            st.subheader("Post Class Announcement")
-            with st.form("t_ann_form"):
-                a_title = st.text_input("Title")
-                a_content = st.text_area("Message")
-                a_prio = st.selectbox("Priority", ["NORMAL", "IMPORTANT", "URGENT"])
-                if st.form_submit_button("Publish Announcement"):
-                    if a_title and a_content:
-                        db.add(DBAnnouncement(
-                            title=a_title, content=a_content, priority=a_prio,
-                            author_name=st.session_state.full_name
-                        ))
+                d_tags = st.text_input("Tags", placeholder="e.g. #urgent, #python, #project")
+                d_notes = st.text_area("Notes & Reference Links")
+
+                d_submit = st.form_submit_button("Save Full Task", type="primary", use_container_width=True)
+                if d_submit:
+                    if not d_title.strip():
+                        st.error("Task title is required.")
+                    else:
+                        combined_dt = datetime.datetime.combine(d_date, d_time)
+                        proj_id = proj_options[d_project] if d_project else (projects[0].id if projects else None)
+                        
+                        full_t = Task(
+                            user_id=user_id,
+                            title=d_title,
+                            description=d_desc,
+                            project_id=proj_id,
+                            category=d_category,
+                            priority=d_prio,
+                            due_date=combined_dt,
+                            tags=d_tags,
+                            notes=d_notes
+                        )
+                        db.add(full_t)
                         db.commit()
-                        st.success("Announcement published!")
+                        st.toast("Detailed task added successfully!", icon="🎉")
                         st.rerun()
 
     finally:
         db.close()
 
-# =========================
-# STUDENT DASHBOARD & MODULES
-# =========================
-def show_student_dashboard():
+# ==========================================
+# 10. PROJECT MANAGEMENT MODULE
+# ==========================================
+
+def render_projects(user_id):
     db = get_db()
     try:
-        user_id = st.session_state.user_id
-        student = db.query(DBStudent).filter(DBStudent.user_id == user_id).first()
+        st.title("📁 Workspace Projects")
+        
+        # New Project Section
+        with st.expander("➕ Create New Project", expanded=False):
+            with st.form("new_project_form", clear_on_submit=True):
+                p_name = st.text_input("Project Name*")
+                p_desc = st.text_area("Description")
+                p_color = st.color_picker("Project Theme Color", "#6366F1")
+                if st.form_submit_button("Create Project", type="primary"):
+                    if p_name.strip():
+                        new_p = Project(user_id=user_id, name=p_name, description=p_desc, color=p_color)
+                        db.add(new_p)
+                        db.commit()
+                        st.toast("New project created!")
+                        st.rerun()
+                    else:
+                        st.error("Project name is required.")
 
-        if not student:
-            st.error("Student profile context not found.")
+        projects = db.query(Project).filter(Project.user_id == user_id).all()
+        
+        if not projects:
+            render_empty_state("No Projects", "Create a workspace project to organize your workflows.")
             return
 
-        st.title(f"🎓 Welcome, {st.session_state.full_name}")
+        cols = st.columns(2)
+        for idx, proj in enumerate(projects):
+            total_p_tasks = db.query(Task).filter(Task.project_id == proj.id).count()
+            completed_p_tasks = db.query(Task).filter(Task.project_id == proj.id, Task.status == "COMPLETED").count()
+            progress = (completed_p_tasks / total_p_tasks) if total_p_tasks > 0 else 0.0
 
-        # Metrics calculations
-        att_records = db.query(DBAttendance).filter(DBAttendance.student_id == student.id).all()
-        att_pct = "N/A"
-        if att_records:
-            present_cnt = sum(1 for a in att_records if a.is_present)
-            att_pct = f"{(present_cnt / len(att_records)) * 100:.1f}%"
-
-        results = db.query(DBResult).filter(DBResult.student_id == student.id).all()
-        avg_grade = "N/A"
-        if results:
-            tot_pct = sum((r.obtained_marks / r.max_marks) * 100 for r in results if r.max_marks > 0)
-            avg_grade = f"{(tot_pct / len(results)):.1f}%"
-
-        class_name = student.class_rel.name if student.class_rel else "Unassigned"
-
-        col1, col2, col3, col4 = st.columns(4)
-        with col1: render_metric_card("Class / Batch", class_name, "Registered Class", "🏫")
-        with col2: render_metric_card("Attendance Rate", att_pct, "Overall Attendance", "📈")
-        with col3: render_metric_card("Average Grade", avg_grade, "Academic Performance", "🏅")
-        with col4: render_metric_card("Student ID", student.student_id, "Official Roll No", "🆔")
-
-        st.markdown("<hr>", unsafe_allow_html=True)
-
-        tabs = st.tabs(["📊 Attendance Details", "📑 Academic Results", "📝 Assignments", "📚 Study Materials", "🗓️ Class Timetable", "📅 Events"])
-
-        # Attendance Details
-        with tabs[0]:
-            st.subheader("Attendance History")
-            if not att_records:
-                st.info("No attendance records logged yet.")
-            else:
-                data = [{
-                    "Date": a.date,
-                    "Subject": a.subject.name if a.subject else "N/A",
-                    "Status": "Present ✅" if a.is_present else "Absent ❌"
-                } for a in att_records]
-                st.dataframe(pd.DataFrame(data), use_container_width=True)
-
-        # Academic Results
-        with tabs[1]:
-            st.subheader("My Examination Results")
-            if not results:
-                st.info("No exam results published yet.")
-            else:
-                res_data = []
-                for r in results:
-                    pct = (r.obtained_marks / r.max_marks) * 100
-                    grade = "A+" if pct >= 90 else "A" if pct >= 80 else "B" if pct >= 70 else "C" if pct >= 60 else "F"
-                    res_data.append({
-                        "Exam": r.exam_name,
-                        "Subject": r.subject.name if r.subject else "N/A",
-                        "Obtained": r.obtained_marks,
-                        "Max Marks": r.max_marks,
-                        "Percentage": f"{pct:.1f}%",
-                        "Grade": grade
-                    })
-                df_res = pd.DataFrame(res_data)
-                st.dataframe(df_res, use_container_width=True)
-
-                fig = px.bar(df_res, x="Exam", y="Obtained", color="Subject", title="Exam Performance Breakdown")
-                fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#f3f4f6")
-                st.plotly_chart(fig, use_container_width=True)
-
-        # Assignments
-        with tabs[2]:
-            st.subheader("Pending & Active Assignments")
-            if student.class_id:
-                subjects = db.query(DBSubject).filter(DBSubject.class_id == student.class_id).all()
-                sub_ids = [s.id for s in subjects]
-                assignments = db.query(DBAssignment).filter(DBAssignment.subject_id.in_(sub_ids)).all()
-
-                if not assignments:
-                    st.info("No assignments assigned.")
-                else:
-                    for ass in assignments:
-                        subm = db.query(DBSubmission).filter(
-                            DBSubmission.assignment_id == ass.id,
-                            DBSubmission.student_id == student.id
-                        ).first()
-
-                        st.markdown(f"""
-                        <div class="glass-card">
-                            <h4>{ass.title} ({ass.subject.name})</h4>
-                            <p>{ass.description}</p>
-                            <p style="font-size:0.85rem; color:#f59e0b;">⏳ Deadline: {ass.deadline.strftime('%Y-%m-%d %H:%M')}</p>
-                            <p><b>Status:</b> {'Submitted ✅' if subm else 'Pending ⌛'}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                        if ass.file_path and os.path.exists(ass.file_path):
-                            with open(ass.file_path, "rb") as f:
-                                st.download_button("Download Attachment", f, file_name=os.path.basename(ass.file_path), key=f"dl_ass_{ass.id}")
-
-                        if not subm:
-                            up_file = st.file_uploader(f"Submit Assignment for {ass.title}", key=f"up_{ass.id}")
-                            if st.button("Submit Work", key=f"sub_btn_{ass.id}"):
-                                if up_file:
-                                    f_p = save_uploaded_file(up_file)
-                                    if f_p:
-                                        db.add(DBSubmission(
-                                            assignment_id=ass.id,
-                                            student_id=student.id,
-                                            file_path=f_p
-                                        ))
-                                        db.commit()
-                                        st.success("Assignment submitted successfully!")
-                                        st.rerun()
-
-        # Study Materials
-        with tabs[3]:
-            st.subheader("Available Course Materials")
-            if student.class_id:
-                subjects = db.query(DBSubject).filter(DBSubject.class_id == student.class_id).all()
-                sub_ids = [s.id for s in subjects]
-                materials = db.query(DBMaterial).filter(DBMaterial.subject_id.in_(sub_ids)).all()
-
-                if not materials:
-                    st.info("No course materials published yet.")
-                else:
-                    for mat in materials:
-                        st.markdown(f"📄 **{mat.title}** ({mat.subject.name})")
-                        if os.path.exists(mat.file_path):
-                            with open(mat.file_path, "rb") as f:
-                                st.download_button("Download File", f, file_name=os.path.basename(mat.file_path), key=f"dl_mat_{mat.id}")
-
-        # Timetable
-        with tabs[4]:
-            st.subheader("Class Schedule")
-            if student.class_id:
-                tt_entries = db.query(DBTimetable).filter(DBTimetable.class_id == student.class_id).all()
-                if not tt_entries:
-                    st.info("Timetable not yet configured for your class.")
-                else:
-                    df_tt = pd.DataFrame([{
-                        "Day": t.day,
-                        "Period": t.period,
-                        "Subject": t.subject_name,
-                        "Teacher": t.teacher_name,
-                        "Room": t.room
-                    } for t in tt_entries])
-                    st.dataframe(df_tt, use_container_width=True)
-
-        # Events
-        with tabs[5]:
-            st.subheader("Campus Events")
-            events = db.query(DBEvent).order_by(DBEvent.event_date.asc()).all()
-            for e in events:
+            with cols[idx % 2]:
                 st.markdown(f"""
-                <div class="glass-card">
-                    <h4>{e.title}</h4>
-                    <p>{e.description}</p>
-                    <p style="font-size:0.85rem; color:#a78bfa;">📅 Date: {e.event_date} | ⏰ Time: {e.event_time} | 📍 Location: {e.location}</p>
-                    <p style="font-size:0.8rem; color:#64748b;">Organizer: {e.organizer}</p>
+                <div class="glass-card" style="border-left: 6px solid {proj.color};">
+                    <h3 style="margin:0;">{proj.name}</h3>
+                    <p style="color:gray; font-size:0.88rem; margin:6px 0;">{proj.description if proj.description else 'No description'}</p>
+                    <div style="margin: 12px 0;">
+                        <small>Progress: {completed_p_tasks}/{total_p_tasks} Tasks ({int(progress*100)}%)</small>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
+                st.progress(progress)
+                
+    finally:
+        db.close()
+
+# ==========================================
+# 11. CALENDAR VIEW MODULE
+# ==========================================
+
+def render_calendar(user_id):
+    db = get_db()
+    try:
+        st.title("📅 Task Timeline & Calendar")
+        
+        tasks = db.query(Task).filter(Task.user_id == user_id, Task.due_date != None).all()
+        
+        if not tasks:
+            render_empty_state("Calendar Clear", "No scheduled tasks with deadlines were found.")
+            return
+
+        # Prepare DataFrame for Timeline / Calendar Plotly representation
+        events = []
+        for t in tasks:
+            events.append({
+                "Task": t.title,
+                "Start": t.due_date,
+                "Finish": t.due_date + datetime.timedelta(hours=2),
+                "Priority": t.priority,
+                "Status": t.status
+            })
+        
+        df_events = pd.DataFrame(events)
+        
+        fig = px.timeline(
+            df_events, 
+            x_start="Start", 
+            x_end="Finish", 
+            y="Task", 
+            color="Priority",
+            title="Scheduled Deadlines Timeline",
+            color_discrete_map={
+                "LOW": "#10B981",
+                "MEDIUM": "#F59E0B",
+                "HIGH": "#EF4444",
+                "URGENT": "#EC4899"
+            }
+        )
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#9CA3AF"),
+            height=450
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
     finally:
         db.close()
 
-# =========================
-# COMMON MODULES (SEARCH, PROFILE, NOTIFICATIONS)
-# =========================
-def show_search_page():
-    st.title("🔍 Global Campus Search")
-    query = st.text_input("Enter keywords to search students, teachers, announcements, or events:")
-    
-    if query:
-        db = get_db()
-        try:
-            st.markdown("### Search Results")
+# ==========================================
+# 12. ANALYTICS & PRODUCTIVITY REPORTS
+# ==========================================
 
-            # Search Announcements
-            anns = db.query(DBAnnouncement).filter(
-                (DBAnnouncement.title.contains(query)) | (DBAnnouncement.content.contains(query))
-            ).all()
-            if anns:
-                st.markdown("#### Announcements")
-                for a in anns:
-                    render_announcement_card(a)
-
-            # Search Events
-            evts = db.query(DBEvent).filter(
-                (DBEvent.title.contains(query)) | (DBEvent.description.contains(query))
-            ).all()
-            if evts:
-                st.markdown("#### Events")
-                for e in evts:
-                    st.info(f"📅 **{e.title}** ({e.event_date}) - {e.description}")
-
-            # Search Users (Admin/Teacher view)
-            if st.session_state.role in ['admin', 'teacher']:
-                users = db.query(DBUser).filter(
-                    (DBUser.full_name.contains(query)) | (DBUser.username.contains(query)) | (DBUser.email.contains(query))
-                ).all()
-                if users:
-                    st.markdown("#### Users / Accounts")
-                    st.dataframe(pd.DataFrame([{
-                        "Name": u.full_name, "Role": u.role, "Email": u.email, "Username": u.username
-                    } for u in users]), use_container_width=True)
-
-        finally:
-            db.close()
-
-def show_profile_page():
-    st.title("👤 Profile & Settings")
+def render_analytics(user_id):
     db = get_db()
     try:
-        user = db.query(DBUser).filter(DBUser.id == st.session_state.user_id).first()
-        if user:
-            st.markdown(f"""
-            <div class="glass-card">
-                <h3>{user.full_name}</h3>
-                <p><b>Role:</b> {user.role.capitalize()}</p>
-                <p><b>Username:</b> {user.username}</p>
-                <p><b>Email:</b> {user.email}</p>
-                <p><b>Phone:</b> {user.phone if user.phone else 'Not provided'}</p>
-            </div>
-            """, unsafe_allow_html=True)
+        st.title("📊 Productivity Intelligence & Analytics")
+        
+        total = db.query(Task).filter(Task.user_id == user_id).count()
+        completed = db.query(Task).filter(Task.user_id == user_id, Task.status == "COMPLETED").count()
+        completion_rate = (completed / total * 100) if total > 0 else 0
 
-            with st.form("profile_update_form"):
-                st.subheader("Update Information")
-                new_fname = st.text_input("Full Name", value=user.full_name)
-                new_phone = st.text_input("Phone Number", value=user.phone if user.phone else "")
-                new_pass = st.text_input("New Password (leave blank to keep current)", type="password")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Total Lifetime Tasks", total)
+        with c2:
+            st.metric("Completed Tasks", completed)
+        with c3:
+            st.metric("Overall Completion Rate", f"{completion_rate:.1f}%")
 
-                if st.form_submit_button("Update Profile"):
-                    user.full_name = new_fname
-                    user.phone = new_phone
-                    if new_pass:
-                        user.password_hash = hash_password(new_pass)
+        st.markdown("---")
+
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Category Breakdown")
+            cat_data = db.query(Task.category, func.count(Task.id)).filter(Task.user_id == user_id).group_by(Task.category).all()
+            if cat_data:
+                df_cat = pd.DataFrame(cat_data, columns=["Category", "Count"])
+                fig_cat = px.bar(df_cat, x="Category", y="Count", color="Category", color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig_cat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
+                st.plotly_chart(fig_cat, use_container_width=True)
+
+        with col2:
+            st.subheader("Status Velocity")
+            stat_data = db.query(Task.status, func.count(Task.id)).filter(Task.user_id == user_id).group_by(Task.status).all()
+            if stat_data:
+                df_stat = pd.DataFrame(stat_data, columns=["Status", "Count"])
+                fig_stat = px.pie(df_stat, names="Status", values="Count", hole=0.4)
+                fig_stat.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
+                st.plotly_chart(fig_stat, use_container_width=True)
+
+    finally:
+        db.close()
+
+# ==========================================
+# 13. USER PROFILE & NOTIFICATIONS
+# ==========================================
+
+def render_profile_and_notifications(user_id):
+    db = get_db()
+    try:
+        st.title("👤 User Profile & Notifications")
+        
+        t1, t2 = st.tabs(["🔔 Notifications", "👤 Account Profile"])
+
+        with t1:
+            st.subheader("System Notifications")
+            notifs = db.query(Notification).filter(Notification.user_id == user_id).order_by(Notification.created_at.desc()).all()
+            if notifs:
+                if st.button("Mark All as Read"):
+                    for n in notifs:
+                        n.is_read = True
                     db.commit()
-                    st.session_state.full_name = new_fname
-                    st.success("Profile updated successfully!")
                     st.rerun()
+
+                for n in notifs:
+                    read_status = "opacity: 0.6;" if n.is_read else "border-left: 4px solid #6366F1;"
+                    st.markdown(f"""
+                    <div class="glass-card" style="{read_status}">
+                        <div style="display:flex; justify-content:space-between;">
+                            <strong>{n.title}</strong>
+                            <small style="color:gray;">{n.created_at.strftime('%b %d, %H:%M')}</small>
+                        </div>
+                        <p style="margin:4px 0 0 0; color:gray; font-size:0.9rem;">{n.message}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                render_empty_state("No Notifications", "You're all caught up!")
+
+        with t2:
+            u = db.query(User).filter(User.id == user_id).first()
+            st.subheader("Account Details")
+            st.write(f"**Username:** {u.username}")
+            st.write(f"**Email:** {u.email}")
+            st.write(f"**Member Since:** {u.created_at.strftime('%B %d, %Y')}")
+
     finally:
         db.close()
 
-def show_notifications_page():
-    st.title("🔔 Notifications Center")
-    db = get_db()
-    try:
-        user_id = st.session_state.user_id
-        notifs = db.query(DBNotification).filter(DBNotification.user_id == user_id).order_by(DBNotification.created_at.desc()).all()
+# ==========================================
+# 14. MAIN APPLICATION ROUTER & NAVIGATION
+# ==========================================
 
-        if st.button("Mark All as Read"):
-            for n in notifs:
-                n.is_read = True
-            db.commit()
+def main():
+    if not st.session_state["user"]:
+        render_auth_page()
+        return
+
+    user_id = st.session_state["user"]["id"]
+
+    # Sidebar Navigation & User Panel
+    with st.sidebar:
+        st.markdown("<h2 style='font-weight:800;'>⚡ TASKFLOW</h2>", unsafe_allow_html=True)
+        st.caption(f"Logged in as **{st.session_state['user']['username']}**")
+        st.markdown("---")
+
+        # Theme Switcher
+        theme_toggle = st.toggle("🌙 Dark Interface", value=(st.session_state["theme"] == "dark"))
+        new_theme = "dark" if theme_toggle else "light"
+        if new_theme != st.session_state["theme"]:
+            st.session_state["theme"] = new_theme
             st.rerun()
 
-        if not notifs:
-            st.info("No notifications at this time.")
-        else:
-            for n in notifs:
-                status = "Read" if n.is_read else "🆕 New"
-                st.markdown(f"""
-                <div class="glass-card">
-                    <div style="display:flex; justify-mode:space-between; align-items:center;">
-                        <span style="font-weight:600;">{n.message}</span>
-                        <span style="font-size:0.8rem; color:#64748b;">{status}</span>
-                    </div>
-                    <div style="font-size:0.75rem; color:#64748b; margin-top:5px;">{n.created_at.strftime('%Y-%m-%d %H:%M')}</div>
-                </div>
-                """, unsafe_allow_html=True)
-    finally:
+        st.markdown("### Navigation")
+        
+        db = get_db()
+        unread_count = db.query(Notification).filter(Notification.user_id == user_id, Notification.is_read == False).count()
         db.close()
 
-# =========================
-# MAIN NAVIGATION & APPLICATION
-# =========================
-def main():
-    if not st.session_state.authenticated:
-        show_login_page()
-    else:
-        # Sidebar Navigation
-        with st.sidebar:
-            st.markdown("""
-            <div style="text-align: center; padding: 10px 0;">
-                <h2 style="color: #60a5fa; margin: 0;">🚀 ALPHA CAMPUS</h2>
-                <p style="font-size: 0.8rem; color: #94a3b8;">Portal System</p>
-            </div>
-            """, unsafe_allow_html=True)
-            st.markdown("<hr>", unsafe_allow_html=True)
+        nav_options = {
+            "Dashboard": "🏠 Dashboard",
+            "Tasks": "📋 Task Manager",
+            "Projects": "📁 Projects",
+            "Calendar": "📅 Calendar",
+            "Analytics": "📊 Analytics",
+            "Notifications": f"🔔 Notifications ({unread_count})" if unread_count > 0 else "🔔 Notifications"
+        }
 
-            # Display Logged-in User Info
-            st.markdown(f"👤 **{st.session_state.full_name}**")
-            st.markdown(f"🏷️ *Role: {st.session_state.role.capitalize()}*")
-            st.markdown("<hr>", unsafe_allow_html=True)
-
-            # Navigation Menu Options
-            menu_options = ["Dashboard", "Global Search", "Notifications", "My Profile"]
-            nav_choice = st.radio("Navigation", menu_options)
-
-            st.markdown("<hr>", unsafe_allow_html=True)
-            if st.button("🚪 Logout", use_container_width=True):
-                st.session_state.authenticated = False
-                st.session_state.user_id = None
-                st.session_state.role = None
-                st.session_state.username = None
-                st.session_state.full_name = None
+        for key, label in nav_options.items():
+            if st.button(label, key=f"nav_{key}", use_container_width=True, type="primary" if st.session_state["active_tab"] == key else "secondary"):
+                st.session_state["active_tab"] = key
                 st.rerun()
 
-        # Render Core Screens based on selection
-        if nav_choice == "Dashboard":
-            if st.session_state.role == "admin":
-                show_admin_dashboard()
-            elif st.session_state.role == "teacher":
-                show_teacher_dashboard()
-            elif st.session_state.role == "student":
-                show_student_dashboard()
-        elif nav_choice == "Global Search":
-            show_search_page()
-        elif nav_choice == "Notifications":
-            show_notifications_page()
-        elif nav_choice == "My Profile":
-            show_profile_page()
+        st.markdown("---")
+        if st.button("🚪 Sign Out", use_container_width=True):
+            st.session_state["user"] = None
+            st.session_state["active_tab"] = "Dashboard"
+            st.rerun()
+
+    # Route Views
+    tab = st.session_state["active_tab"]
+    if tab == "Dashboard":
+        render_dashboard(user_id)
+    elif tab == "Tasks":
+        render_task_management(user_id)
+    elif tab == "Projects":
+        render_projects(user_id)
+    elif tab == "Calendar":
+        render_calendar(user_id)
+    elif tab == "Analytics":
+        render_analytics(user_id)
+    elif tab == "Notifications":
+        render_profile_and_notifications(user_id)
 
 if __name__ == "__main__":
     main()

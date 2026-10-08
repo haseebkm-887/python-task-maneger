@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 ALPHA TASKFLOW - PREMIUM TASK MANAGER
-# Single-File Streamlit Application (app.py)
+# Single-File Streamlit Application (fahhkm.py)
 # ==========================================
 
 import os
@@ -557,8 +557,8 @@ def render_dashboard(user_id):
                 counts.append(cnt)
 
             df_chart = pd.DataFrame({"Day": day_labels, "Completed Tasks": counts})
-            
-                        if px is not None:
+
+            if px is not None:
                 fig = px.bar(
                     df_chart,
                     x="Day",
@@ -590,13 +590,12 @@ def render_dashboard(user_id):
                 p_counts.append(cnt)
             
             df_pie = pd.DataFrame({"Priority": p_labels, "Count": p_counts})
-                        if px is None:
+            if px is None:
                 st.info("Charts are unavailable because Plotly is not installed.")
             elif sum(p_counts) > 0:
                 fig_pie = px.pie(
-
-                    df_pie, 
-                    values="Count", 
+                    df_pie,
+                    values="Count",
                     names="Priority",
                     color="Priority",
                     color_discrete_map={
@@ -899,8 +898,8 @@ def render_calendar(user_id):
         st.title("📅 Task Timeline & Calendar")
         
         tasks = db.query(Task).filter(Task.user_id == user_id, Task.due_date != None).all()
-        
-                if not tasks:
+
+        if not tasks:
             render_empty_state("Calendar Clear", "No scheduled tasks with deadlines were found.")
             return
         if px is None:
@@ -908,6 +907,7 @@ def render_calendar(user_id):
             return
 
         # Prepare DataFrame for Timeline / Calendar Plotly representation
+
 
         events = []
         for t in tasks:
@@ -974,24 +974,34 @@ def render_analytics(user_id):
         with col1:
             st.subheader("Category Breakdown")
             cat_data = db.query(Task.category, func.count(Task.id)).filter(Task.user_id == user_id).group_by(Task.category).all()
-                        if cat_data and px is not None:
+            if cat_data and px is not None:
                 df_cat = pd.DataFrame(cat_data, columns=["Category", "Count"])
-
-                fig_cat = px.bar(df_cat, x="Category", y="Count", color="Category", color_discrete_sequence=px.colors.qualitative.Pastel)
-                                fig_cat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
+                fig_cat = px.bar(
+                    df_cat,
+                    x="Category",
+                    y="Count",
+                    color="Category",
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_cat.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#9CA3AF")
+                )
                 st.plotly_chart(fig_cat, use_container_width=True)
             elif cat_data:
                 st.info("Charts are unavailable because Plotly is not installed.")
 
         with col2:
-
             st.subheader("Status Velocity")
             stat_data = db.query(Task.status, func.count(Task.id)).filter(Task.user_id == user_id).group_by(Task.status).all()
-                        if stat_data and px is not None:
+            if stat_data and px is not None:
                 df_stat = pd.DataFrame(stat_data, columns=["Status", "Count"])
-
                 fig_stat = px.pie(df_stat, names="Status", values="Count", hole=0.4)
-                                fig_stat.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
+                fig_stat.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#9CA3AF")
+                )
                 st.plotly_chart(fig_stat, use_container_width=True)
             elif stat_data:
                 st.info("Charts are unavailable because Plotly is not installed.")

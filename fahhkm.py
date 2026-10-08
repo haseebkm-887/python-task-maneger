@@ -6,7 +6,6 @@ import io
 import re
 import datetime
 import pandas as pd
-import bcrypt
 import streamlit as st
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, Date, DateTime, Time,

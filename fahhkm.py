@@ -124,7 +124,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-if "theme" not in st.state_dict:
+# Correct session state initialization
+if "theme" not in st.session_state:
     st.session_state["theme"] = "dark"
 
 if "editing_task_id" not in st.session_state:
@@ -135,7 +136,6 @@ if "editing_task_id" not in st.session_state:
 # ==========================================
 is_dark = st.session_state["theme"] == "dark"
 
-# Theme Variables
 bg_gradient = "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)" if is_dark else "linear-gradient(135deg, #f8fafc 0%, #e0e7ff 50%, #f3e8ff 100%)"
 card_bg = "rgba(30, 41, 59, 0.7)" if is_dark else "rgba(255, 255, 255, 0.85)"
 card_border = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.08)"
@@ -263,7 +263,6 @@ css = f"""
         gap: 0.25rem;
     }}
 
-    /* Hide standard Streamlit header/footer padding */
     .block-container {{
         padding-top: 2rem;
         padding-bottom: 3rem;
@@ -386,12 +385,10 @@ else:
     for task in tasks:
         t_id, t_title, t_desc, t_priority, t_due, t_status = task
         
-        # Determine display status badge
         is_overdue = (t_status == "Pending" and t_due < today_str)
         status_badge_class = "status-Overdue" if is_overdue else f"status-{t_status}"
         status_label = "Overdue" if is_overdue else t_status
 
-        # Task Card Container
         with st.container():
             col_content, col_actions = st.columns([4, 1.2])
             
@@ -408,21 +405,17 @@ else:
                 """, unsafe_allow_html=True)
 
             with col_actions:
-                # Action Buttons
                 btn_c1, btn_c2, btn_c3 = st.columns(3)
                 
-                # Toggle Status Button
                 check_icon = "↩️" if t_status == "Completed" else "✅"
                 if btn_c1.button(check_icon, key=f"toggle_{t_id}", help="Toggle Complete/Pending"):
                     toggle_task_status(t_id, t_status)
                     st.rerun()
 
-                # Edit Button
                 if btn_c2.button("✏️", key=f"edit_btn_{t_id}", help="Edit Task"):
                     st.session_state["editing_task_id"] = t_id
                     st.rerun()
 
-                # Delete Button
                 if btn_c3.button("🗑️", key=f"del_{t_id}", help="Delete Task"):
                     delete_task(t_id)
                     st.toast("Task deleted!", icon="🗑️")
@@ -431,12 +424,11 @@ else:
             st.markdown("<hr style='margin: 1rem 0; opacity: 0.1;'>", unsafe_allow_html=True)
 
 # ==========================================
-# 8. EDIT TASK MODAL/FORM (INLINE EXPANDER)
+# 8. EDIT TASK FORM
 # ==========================================
 if st.session_state["editing_task_id"] is not None:
     edit_id = st.session_state["editing_task_id"]
     
-    # Get current task details
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT id, title, description, priority, due_date, status FROM tasks WHERE id = ?", (edit_id,))

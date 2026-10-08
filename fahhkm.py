@@ -7,9 +7,12 @@ import os
 import re
 import datetime
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+try:
+    import plotly.express as px
+except ImportError:
+    px = None
 import bcrypt
+
 import streamlit as st
 
 from sqlalchemy import (
@@ -555,24 +558,28 @@ def render_dashboard(user_id):
 
             df_chart = pd.DataFrame({"Day": day_labels, "Completed Tasks": counts})
             
-            fig = px.bar(
-                df_chart, 
-                x="Day", 
-                y="Completed Tasks", 
-                text="Completed Tasks",
-                color_discrete_sequence=["#6366F1"]
-            )
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#9CA3AF"),
-                margin=dict(l=10, r=10, t=20, b=20),
-                height=260,
-                xaxis=dict(showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)")
-            )
-            fig.update_traces(marker_round_shape="round", marker_line_width=0)
-            st.plotly_chart(fig, use_container_width=True)
+                        if px is not None:
+                fig = px.bar(
+                    df_chart,
+                    x="Day",
+                    y="Completed Tasks",
+                    text="Completed Tasks",
+                    color_discrete_sequence=["#6366F1"]
+                )
+                fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#9CA3AF"),
+                    margin=dict(l=10, r=10, t=20, b=20),
+                    height=260,
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)")
+                )
+                fig.update_traces(marker_round_shape="round", marker_line_width=0)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Charts are unavailable because Plotly is not installed.")
+
 
         with c2:
             st.subheader("🎯 Priority Distribution")
@@ -583,8 +590,11 @@ def render_dashboard(user_id):
                 p_counts.append(cnt)
             
             df_pie = pd.DataFrame({"Priority": p_labels, "Count": p_counts})
-            if sum(p_counts) > 0:
+                        if px is None:
+                st.info("Charts are unavailable because Plotly is not installed.")
+            elif sum(p_counts) > 0:
                 fig_pie = px.pie(
+
                     df_pie, 
                     values="Count", 
                     names="Priority",
@@ -890,11 +900,15 @@ def render_calendar(user_id):
         
         tasks = db.query(Task).filter(Task.user_id == user_id, Task.due_date != None).all()
         
-        if not tasks:
+                if not tasks:
             render_empty_state("Calendar Clear", "No scheduled tasks with deadlines were found.")
+            return
+        if px is None:
+            st.info("The calendar chart is unavailable because Plotly is not installed.")
             return
 
         # Prepare DataFrame for Timeline / Calendar Plotly representation
+
         events = []
         for t in tasks:
             events.append({
@@ -960,22 +974,30 @@ def render_analytics(user_id):
         with col1:
             st.subheader("Category Breakdown")
             cat_data = db.query(Task.category, func.count(Task.id)).filter(Task.user_id == user_id).group_by(Task.category).all()
-            if cat_data:
+                        if cat_data and px is not None:
                 df_cat = pd.DataFrame(cat_data, columns=["Category", "Count"])
+
                 fig_cat = px.bar(df_cat, x="Category", y="Count", color="Category", color_discrete_sequence=px.colors.qualitative.Pastel)
-                fig_cat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
+                                fig_cat.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
                 st.plotly_chart(fig_cat, use_container_width=True)
+            elif cat_data:
+                st.info("Charts are unavailable because Plotly is not installed.")
 
         with col2:
+
             st.subheader("Status Velocity")
             stat_data = db.query(Task.status, func.count(Task.id)).filter(Task.user_id == user_id).group_by(Task.status).all()
-            if stat_data:
+                        if stat_data and px is not None:
                 df_stat = pd.DataFrame(stat_data, columns=["Status", "Count"])
+
                 fig_stat = px.pie(df_stat, names="Status", values="Count", hole=0.4)
-                fig_stat.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
+                                fig_stat.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#9CA3AF"))
                 st.plotly_chart(fig_stat, use_container_width=True)
+            elif stat_data:
+                st.info("Charts are unavailable because Plotly is not installed.")
 
     finally:
+
         db.close()
 
 # ==========================================

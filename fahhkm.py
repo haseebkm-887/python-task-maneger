@@ -1,17 +1,23 @@
 # ==========================================
 # 🚀 ALPHA TASKFLOW - PREMIUM TASK MANAGER
-# Single-File Streamlit Application (fahhkm.py)
+# Single-File Streamlit Application (app.py)
 # ==========================================
 
 import os
 import re
 import datetime
 import pandas as pd
+import hashlib
+import hmac
+import secrets
 try:
     import plotly.express as px
 except ImportError:
     px = None
-import bcrypt
+try:
+    import bcrypt
+except ImportError:
+    bcrypt = None
 
 import streamlit as st
 
@@ -116,10 +122,34 @@ def get_db():
     return SessionLocal()
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    password_bytes = password.encode('utf-8')
+    if bcrypt is not None:
+        return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode('utf-8')
+
+    salt = secrets.token_hex(16)
+    password_hash = hashlib.pbkdf2_hmac(
+        'sha256', password_bytes, bytes.fromhex(salt), 200000
+    ).hex()
+    return 'pbkdf2_sha256${}${}'.format(salt, '$' + password_hash)
 
 def check_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    if hashed.startswith('pbkdf2_sha256$'):
+        try:
+            _, salt, stored_hash = hashed.split('$', 2)
+            candidate = hashlib.pbkdf2_hmac(
+                'sha256', password.encode('utf-8'), bytes.fromhex(salt), 200000
+            ).hex()
+            return hmac.compare_digest(candidate, stored_hash)
+        except (ValueError, TypeError):
+            return False
+
+    if bcrypt is None:
+        return False
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except (ValueError, TypeError):
+        return False
+
 
 def register_user(username, email, password):
     db = get_db()
